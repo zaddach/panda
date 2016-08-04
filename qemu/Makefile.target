@@ -285,6 +285,8 @@ endif
 obj-$(CONFIG_IVSHMEM) += ivshmem.o
 
 # Hardware support
+obj-y += avatar.o
+
 obj-i386-y += vga.o
 obj-i386-y += mc146818rtc.o pc.o
 obj-i386-y += cirrus_vga.o sga.o apic.o ioapic.o piix_pci.o
