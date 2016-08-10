@@ -104,16 +104,27 @@ mmio_read(void *opaque, target_phys_addr_t addr, unsigned int size)
 {
     AvatarState *s = opaque;
     QDict *msg = qdict_new();
+    QDict *params = qdict_new();
     QString *msg_str;
+    char hexval[20];
 
-    assert(msg && "Failed to allocate memory for JSON dictionary");
+    assert(msg && params && "Failed to allocate memory for JSON dictionary");
     
-    qdict_put(msg, "address", qint_from_int((int64_t) addr));
-    qdict_put(msg, "size", qint_from_int(size));
+    snprintf(hexval, sizeof(hexval), "0x%" PRIx64, (uint64_t) addr); 
+    hexval[sizeof(hexval) - 1] = '\0';
+    qdict_put(params, "address", qstring_from_str(hexval));
+
+    snprintf(hexval, sizeof(hexval), "0x%" PRIx64, (uint64_t) size); 
+    hexval[sizeof(hexval) - 1] = '\0';
+    qdict_put(params, "size", qstring_from_str(hexval));
+    
+    qdict_put(msg, "params", params);
+    qdict_put(msg, "cmd", qstring_from_str("read"));
 
     msg_str = qobject_to_json(QOBJECT(msg));
     
     qemu_chr_fe_write(s->chr, (const uint8_t *) qstring_get_str(msg_str), msg_str->length);
+    qemu_chr_fe_write(s->chr, (const uint8_t *) "\n", 1);
 
     QDECREF(msg_str);
     QDECREF(msg);
@@ -128,7 +139,14 @@ mmio_read(void *opaque, target_phys_addr_t addr, unsigned int size)
 
     qemu_mutex_unlock(&s->responses.mutex);
 
-    uint64_t value = qdict_get_int(response, "value");
+    QString *value_str = qobject_to_qstring(qdict_get(response, "value"));
+    assert(value_str && "No value in response");
+    uint64_t value = 0;
+    int matched_items = sscanf(qstring_get_str(value_str), "0x%" PRIx64, &value);
+
+    assert(matched_items == 1 && "Could not match value hex string in JSON response");
+
+    QDECREF(value_str);
     QDECREF(response);
     
     return value;
@@ -140,17 +158,31 @@ mmio_write(void *opaque, target_phys_addr_t addr,
 {
     AvatarState *s = opaque;
     QDict *msg = qdict_new();
+    QDict *params = qdict_new();
     QString *msg_str;
+    char hexval[20];
 
-    assert(msg && "Failed to allocate memory for JSON dictionary");
+    assert(msg && params && "Failed to allocate memory for JSON dictionary");
     
-    qdict_put(msg, "address", qint_from_int((int64_t) addr));
-    qdict_put(msg, "size", qint_from_int(size));
-    qdict_put(msg, "value", qint_from_int((int64_t) val64));
+    snprintf(hexval, sizeof(hexval), "0x%" PRIx64, (uint64_t) addr); 
+    hexval[sizeof(hexval) - 1] = '\0';
+    qdict_put(params, "address", qstring_from_str(hexval));
+
+    snprintf(hexval, sizeof(hexval), "0x%" PRIx64, (uint64_t) size); 
+    hexval[sizeof(hexval) - 1] = '\0';
+    qdict_put(params, "size", qstring_from_str(hexval));
+
+    snprintf(hexval, sizeof(hexval), "0x%" PRIx64, (uint64_t) val64); 
+    hexval[sizeof(hexval) - 1] = '\0';
+    qdict_put(params, "value", qstring_from_str(hexval));
+
+    qdict_put(msg, "params", params);
+    qdict_put(msg, "cmd", qstring_from_str("write"));
 
     msg_str = qobject_to_json(QOBJECT(msg));
     
     qemu_chr_fe_write(s->chr, (const uint8_t*) qstring_get_str(msg_str), msg_str->length);
+    qemu_chr_fe_write(s->chr, (const uint8_t *) "\n", 1);
 
     QDECREF(msg_str);
     QDECREF(msg);
@@ -185,7 +217,7 @@ static void chardev_rx(void *opaque, const uint8_t *buf, int size)
                 qemu_mutex_unlock(&s->responses.mutex);
             } 
             else {
-                //TODO: Error, cannot parse response
+                printf("avatar: Got invalid JSON response \"%s\"\n", s->receive_buf);
             }
             s->receive_buf_pos = 0;
         }
@@ -225,7 +257,6 @@ static int avatar_device_init(SysBusDevice *dev)
     }
 
     qemu_chr_add_handlers(s->chr, chardev_can_rx, chardev_rx, chardev_event, s);
-    qemu_chr_fe_open(s->chr);
 
 //    sysbus_init_irq(dev, &s->irq);
 
